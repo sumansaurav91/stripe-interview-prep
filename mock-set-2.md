@@ -1,38 +1,50 @@
-🎯 Stripe Mock Interview Set #2
-1) Coding (45 min)
-Question:
+# 🎯 Stripe Mock Interview Set #2
 
-You’re building a dispute resolution system for Stripe. Given an array of payment events, return the longest streak of consecutive successful payments for a merchant.
+## Table of Contents
+- [1. Coding Challenge (45 min)](#1-coding-challenge-45-min)
+- [2. Full-Stack / System Design (60 min)](#2-full-stack--system-design-60-min)
+- [3. API / Product Design (45 min)](#3-api--product-design-45-min)
+- [4. Debugging / Technical Deep Dive (30 min)](#4-debugging--technical-deep-dive-30-min)
+- [5. Behavioral / Stripe Values (30 min)](#5-behavioral--stripe-values-30-min)
 
+---
+
+## 1. Coding Challenge (45 min)
+
+### Question
+
+You're building a dispute resolution system for Stripe. Given an array of payment events, return the longest streak of consecutive successful payments for a merchant.
+
+#### Event Structure
 Each event looks like:
-
+```typescript
 {
   id: string;
   merchantId: string;
   status: "succeeded" | "failed" | "pending";
   timestamp: number; // Unix epoch seconds
 }
+```
 
+#### Requirements
+- A streak means consecutive chronological events for that merchant with status = "succeeded"
+- Return a map `{ merchantId: longestStreak }`
+- Handle millions of events efficiently
 
-A streak means consecutive chronological events for that merchant with status = "succeeded".
+### Answer / Approach
 
-Return a map { merchantId: longestStreak }.
+#### Algorithm Steps
+1. **Group events by merchantId**
+2. **Sort each group by timestamp**
+3. **Scan sequentially to count streaks**
 
-Handle millions of events efficiently.
+#### Complexity Analysis
+- **Time Complexity**: O(n log n) due to sorting, O(n) scan
+- **Optimization**: If upstream data is already time-ordered, drop sort → O(n)
 
-Answer / Approach
+### TypeScript Solution
 
-Step 1: Group events by merchantId.
-
-Step 2: Sort each group by timestamp.
-
-Step 3: Scan sequentially to count streaks.
-
-Complexity: O(n log n) due to sorting, O(n) scan.
-
-Optimization: If upstream data is already time-ordered, drop sort → O(n).
-
-TypeScript Solution
+```typescript
 type Event = {
   id: string;
   merchantId: string;
@@ -42,13 +54,18 @@ type Event = {
 
 function longestStreak(events: Event[]): Record<string, number> {
   const grouped: Record<string, Event[]> = {};
+  
+  // Group events by merchantId
   for (const e of events) {
     (grouped[e.merchantId] ||= []).push(e);
   }
 
   const result: Record<string, number> = {};
+  
+  // Process each merchant's events
   for (const [merchantId, list] of Object.entries(grouped)) {
     list.sort((a, b) => a.timestamp - b.timestamp);
+    
     let longest = 0, cur = 0;
     for (const e of list) {
       if (e.status === "succeeded") {
@@ -58,59 +75,68 @@ function longestStreak(events: Event[]): Record<string, number> {
         cur = 0;
       }
     }
+    
     result[merchantId] = longest;
   }
+  
   return result;
 }
+```
 
-Edge cases
+### Edge Cases
+- **Merchant with no successes** → streak = 0
+- **Multiple merchants** → each independent
+- **Millions of events** → watch memory; could stream events sorted by merchant, timestamp (merge-sort style)
 
-Merchant with no successes → streak = 0.
+### Production Considerations
+- Store events partitioned by `(merchant_id, timestamp)` in DB → avoid per-merchant sort
+- Precompute streak counters in warehouse for dashboards
 
-Multiple merchants → each independent.
+---
 
-Millions of events → watch memory; could stream events sorted by merchant,timestamp (merge-sort style).
+## 2. Full-Stack / System Design (60 min)
 
-Production considerations
+### Question
 
-Store events partitioned by (merchant_id, timestamp) in DB → avoid per-merchant sort.
+**"Design a refund service for Stripe merchants."**
 
-Precompute streak counters in warehouse for dashboards.
+Merchants can request refunds for charges.
 
-2) Full-Stack / System Design (60 min)
-Question:
+#### Requirements
+- Support partial & full refunds
+- Refunds should be idempotent (same refund request can be retried)
+- Must handle asynchronous processing (refunds can take minutes)
+- Provide API + dashboard view
+- Scale to tens of millions of refunds/day
 
-“Design a refund service for Stripe merchants.”
+### Answer (Stripe-level)
 
-Merchants can request refunds for charges. Requirements:
+#### Core APIs
 
-Support partial & full refunds.
-
-Refunds should be idempotent (same refund request can be retried).
-
-Must handle asynchronous processing (refunds can take minutes).
-
-Provide API + dashboard view.
-
-Scale to tens of millions of refunds/day.
-
-Answer (Stripe-level)
-Core APIs
-
+```http
 POST /v1/refunds
-Body: { charge_id, amount?, reason?, idempotency_key }
+Body: {
+  charge_id,
+  amount?, 
+  reason?, 
+  idempotency_key
+}
 
 GET /v1/refunds/:id
 
 GET /v1/refunds?charge_id=...
 
 POST /v1/webhooks/refunds (for status updates)
+```
 
-Refund lifecycle
+#### Refund Lifecycle
+```
+pending → processing → succeeded | failed
+```
 
-pending → processing → succeeded | failed.
+#### DB Schema
 
-DB Schema
+```sql
 CREATE TABLE refunds (
   id UUID PRIMARY KEY,
   charge_id UUID NOT NULL,
@@ -123,57 +149,53 @@ CREATE TABLE refunds (
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(merchant_id, idempotency_key) -- ensures idempotency
 );
+```
 
-Flow
+#### Flow
 
-Request: Merchant POSTs refund with idempotency key.
+1. **Request**: Merchant POSTs refund with idempotency key
+2. **Validation**:
+   - Ensure charge exists & refundable
+   - Check idempotency (same merchant + key → return existing record)
+3. **Persist**: Insert refund row with pending
+4. **Async Worker**: Picks refund, calls external payment rails (ACH, card network)
+5. **Update**: Refund becomes processing, then webhook updates → succeeded or failed
+6. **Notify**: Merchant can GET or receive webhook
 
-Validation:
+#### Scale
+- Partition refunds by `(merchant_id, created_at)` for queries
+- Kafka/Kinesis queue for async refund jobs
+- DLQ for failed attempts
+- Ensure at-least-once delivery but with idempotency guard
 
-Ensure charge exists & refundable.
+#### Frontend
 
-Check idempotency (same merchant + key → return existing record).
+**Dashboard React UI**:
+- "Request refund" modal
+- Refund list view with filters (status/date)
+- Status updates via polling or WebSocket → real-time
 
-Persist: Insert refund row with pending.
+---
 
-Async Worker: Picks refund, calls external payment rails (ACH, card network).
+## 3. API / Product Design (45 min)
 
-Update: Refund becomes processing, then webhook updates → succeeded or failed.
+### Question
 
-Notify: Merchant can GET or receive webhook.
-
-Scale
-
-Partition refunds by (merchant_id, created_at) for queries.
-
-Kafka/Kinesis queue for async refund jobs.
-
-DLQ for failed attempts.
-
-Ensure at-least-once delivery but with idempotency guard.
-
-Frontend
-
-Dashboard React UI:
-
-“Request refund” modal.
-
-Refund list view with filters (status/date).
-
-Status updates via polling or WebSocket → real-time.
-
-3) API / Product Design (45 min)
-Question:
-
-“Design an API for webhook management at Stripe.”
+**"Design an API for webhook management at Stripe."**
 
 Merchants want to register, test, and manage webhooks.
 
-Answer
-Endpoints
+### Answer
 
+#### Endpoints
+
+```http
 POST /v1/webhook_endpoints
-Body: { url, events: ["payment_intent.succeeded", "charge.refunded"], secret? }
+Body: {
+  url,
+  events: ["payment_intent.succeeded", "charge.refunded"],
+  secret?
+}
 
 GET /v1/webhook_endpoints
 
@@ -182,99 +204,111 @@ GET /v1/webhook_endpoints/:id
 POST /v1/webhook_endpoints/:id/test
 
 DELETE /v1/webhook_endpoints/:id
+```
 
-Features
+#### Features
 
-Support multiple endpoints per merchant.
+- **Multiple endpoints per merchant**
+- **Event filtering** → less noise for merchants
+- **Secret rotation** → security best practices
+- **Retry policies + DLQ** → handle endpoint downtime
 
-Allow filtering by event types → less noise.
+#### Developer Experience
 
-Rotate secrets easily.
+- **Dashboard UI** for quick setup
+- **Test webhook** with example payload
+- **Clear error messages** for misconfigured URLs (timeouts, 500s)
 
-Provide retry policies + DLQ if endpoint down.
+#### Versioning
 
-Developer experience
+- Webhooks tied to **Stripe API version** of account
+- **Breaking changes** → require opt-in per endpoint
 
-Provide dashboard UI for quick setup.
+---
 
-Expose Test webhook with example payload.
+## 4. Debugging / Technical Deep Dive (30 min)
 
-Clear error messages for misconfigured URLs (timeouts, 500).
+### Scenario
 
-Versioning
+A merchant complains: **"Refund requests sometimes succeed, sometimes fail with duplicate refund error."**
 
-Webhooks tied to Stripe API version of account.
+#### Logs
 
-Breaking change → require opt-in per endpoint.
-
-4) Debugging / Technical Deep Dive (30 min)
-Scenario:
-
-A merchant complains: “Refund requests sometimes succeed, sometimes fail with duplicate refund error.”
-
-Logs:
+```http
+POST /v1/refunds
+Idempotency-Key: refund-123
+Response: 200 OK {
+  refund_id: r1,
+  status: "succeeded"
+}
 
 POST /v1/refunds
 Idempotency-Key: refund-123
-Response: 200 OK { refund_id: r1, status: "succeeded" }
+Body differs:
+  { charge_id: c1, amount: 2000 } vs. { charge_id: c1, amount: 1500 }
+Response: 409 Conflict "duplicate refund"
+```
 
-POST /v1/refunds
-Idempotency-Key: refund-123
-Body differs: { charge_id: c1, amount: 2000 } vs. { charge_id: c1, amount: 1500 }
-Response: 409 Conflict duplicate refund
+### Answer
 
-Answer
+#### Root Cause
+- **Same idempotency key** used with **different payloads**
+- Stripe guarantees idempotency only if request body is identical
+- Different amount = conflict
 
-Root cause:
+#### Debugging Steps
 
-Same idempotency key used with different payloads.
+1. **Compare stored payload hash** vs. new request
+2. **Look at merchant integration code** → are they reusing a static key?
+3. **Check client retries** → is the library setting keys properly?
 
-Stripe guarantees idempotency only if request body is identical.
+#### Fix
 
-Different amount = conflict.
+1. **Educate merchant**:
+   - Idempotency key must be **unique per refund attempt**
+   - But **consistent across retries** of that same attempt
 
-Debugging steps:
+2. **Add middleware**:
+   - Hash request body on first use
+   - Reject mismatched reuse
 
-Compare stored payload hash vs. new.
+3. **Improve error docs**:
+   - Clarify "duplicate refund" vs. "conflict on idempotency"
 
-Look at merchant integration code → are they reusing a static key?
+---
 
-Check client retries: is the library setting keys properly?
+## 5. Behavioral / Stripe Values (30 min)
 
-Fix:
+### Q1: Tell me about a time you simplified a complex system for end users
 
-Educate merchant: idempotency key must be unique per refund attempt, but consistent across retries of that same attempt.
+#### Answer (STAR Format)
 
-Add middleware: hash request body on first use; reject mismatched reuse.
+**Situation**: Our EKS-based pipeline produced opaque errors → users confused
 
-Improve error docs: clarify "duplicate refund" vs. "conflict on idempotency".
+**Task**: Improve developer experience
 
-5) Behavioral / Stripe Values (30 min)
-Q1: Tell me about a time you simplified a complex system for end users.
+**Action**: Built error mapper → mapped low-level infra errors to clear categories (auth, quota, network)
 
-A (STAR):
+**Result**: Ticket volume dropped 30%, dev onboarding much smoother. Shows **"Users First."**
 
-S: Our EKS-based pipeline produced opaque errors → users confused.
+### Q2: Describe a time you identified a scaling bottleneck before it became a production issue
 
-T: Improve developer experience.
+#### Answer
 
-A: Built error mapper → mapped low-level infra errors to clear categories (auth, quota, network).
+**Situation**: High API traffic (200/s) → Postgres read spikes
 
-R: Ticket volume dropped 30%, dev onboarding much smoother. Shows “Users First.”
+**Task**: Anticipate failure before peak season
 
-Q2: Describe a time you identified a scaling bottleneck before it became a production issue.
+**Action**: Ran load tests, spotted missing index on `(account_id, created_at)`. Added composite index + read replicas
 
-A:
+**Result**: Sustained 10x load in production without incident. Shows **"High Standards & Rigor."**
 
-S: High API traffic (200/s) → Postgres read spikes.
+### Q3: Why Stripe?
 
-T: Anticipate failure before peak season.
+#### Answer
 
-A: Ran load tests, spotted missing index on (account_id, created_at). Added composite index + read replicas.
+"I'm excited by Stripe's mission of **growing the GDP of the internet**. My experience building scalable APIs, idempotent systems, and event-driven pipelines aligns directly with Stripe's challenges — **correctness and developer experience**. Stripe's culture of **rigor and empathy** is exactly what I want to contribute to."
 
-R: Sustained 10x load in production without incident. Shows “High Standards & Rigor.”
+---
 
-Q3: Why Stripe?
-
-A:
-“I’m excited by Stripe’s mission of growing the GDP of the internet. My experience building scalable APIs, idempotent systems, and event-driven pipelines aligns directly with Stripe’s challenges — correctness and developer experience. Stripe’s culture of rigor and empathy is exactly what I want to contribute to.”
+*This document contains comprehensive mock interview questions and answers designed to prepare for Stripe's technical interview process. Each section focuses on different aspects of the role while demonstrating technical depth and alignment with Stripe's values.*
