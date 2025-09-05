@@ -1,336 +1,371 @@
-This will be structured into 4 major sections (like Stripe’s loop):
+# 📘 Stripe Interview Practice Workbook - Mock Set 3
 
-Coding (10 Q&A)
+This comprehensive workbook is structured into 4 major sections following Stripe's interview loop format:
+- **Coding** (10 Q&A)
+- **System Design** (8 Q&A)
+- **API/Product** (6 Q&A)
+- **Debugging & Behavioral** (6 Q&A)
 
-System Design (8 Q&A)
+**Total:** 30 curated Stripe-style questions with detailed answers.
 
-API/Product (6 Q&A)
+---
 
-Debugging & Behavioral (6 Q&A)
+## Section 1: Coding Challenges (10)
 
-Total: 30 curated Stripe-style questions with detailed answers.
+### 1. Settlement Ordering by Merchant (Heap)
 
-📘 Stripe Interview Practice Workbook
-Section 1: Coding Challenges (10)
-1. Settlement Ordering by Merchant (Heap)
+**Question:** How would you implement fair settlement ordering?
 
+**Answer:**
 👉 Already covered above — fairness + chronological integrity.
 
-2. Circular Transfers Detection
+---
 
+### 2. Circular Transfers Detection
+
+**Question:** How do you detect circular transfers in a payment system?
+
+**Answer:**
 👉 Already covered — DFS cycle detection.
 
-3. Credit Card Masking
+---
 
-Q: Write a function that takes a card number "4242424242424242" and returns "************4242".
+### 3. Credit Card Masking
 
-A:
+**Question:** Write a function that takes a card number "4242424242424242" and returns "************4242".
 
+**Answer:**
+```typescript
 function maskCard(card: string): string {
   return card.slice(0, -4).replace(/\d/g, '*') + card.slice(-4);
 }
+```
 
+**Stripe-specific insight:** Card data must be tokenized/PCI safe — real code never logs full PAN.
 
-Stripe-specific: Card data must be tokenized/PCI safe — real code never logs full PAN.
+---
 
-4. Currency Normalization
+### 4. Currency Normalization
 
-Q: Convert amounts into minor units (USD: 2 decimals, JPY: 0, KWD: 3).
+**Question:** Convert amounts into minor units (USD: 2 decimals, JPY: 0, KWD: 3).
 
-A:
-
+**Answer:**
+```typescript
 function toMinorUnits(amount: number, currency: string): number {
-  const map: Record<string, number> = { USD: 2, EUR: 2, JPY: 0, KWD: 3 };
+  const map: Record<string, number> = { 
+    USD: 2, 
+    EUR: 2, 
+    JPY: 0, 
+    KWD: 3 
+  };
   return Math.round(amount * Math.pow(10, map[currency] ?? 2));
 }
+```
 
+**Stripe-specific insight:** Stripe always stores integers in DB to avoid float rounding errors.
 
-Stripe always stores integers in DB to avoid float rounding errors.
+---
 
-5. Refund Allocation
+### 5. Refund Allocation
 
-Q: Given a charge with 3 line items, refund $50 across them proportionally.
+**Question:** Given a charge with 3 line items, refund $50 across them proportionally.
 
-A:
+**Answer:**
+- Compute ratio of each line item to total
+- Allocate refund = ratio * 50, round carefully to avoid cent mismatch
+- Stripe does this to ensure math always balances
 
-Compute ratio of each line item to total.
+---
 
-Allocate refund = ratio * 50, round carefully to avoid cent mismatch.
+### 6. Transaction Stream Aggregation
 
-Stripe does this to ensure math always balances.
+**Question:** Given a stream of events `{ accountId, amount }`, compute rolling balance per account.
 
-6. Transaction Stream Aggregation
+**Answer:**
+- HashMap: `balance[accountId] += amount`
+- Complexity O(n)
+- Stripe uses similar approach in ledger streaming pipelines
 
-Q: Given a stream of events { accountId, amount }, compute rolling balance per account.
+---
 
-A:
+### 7. Detect Duplicate Charges
 
-HashMap: balance[accountId] += amount.
+**Question:** Given a list of charges `{ idempotencyKey, amount }`, remove duplicates.
 
-Complexity O(n).
-Stripe uses similar approach in ledger streaming pipelines.
+**Answer:**
+- Use HashSet on `idempotencyKey`
+- **Stripe rule:** All APIs must be idempotent-safe
 
-7. Detect Duplicate Charges
+---
 
-Q: Given a list of charges { idempotencyKey, amount }, remove duplicates.
+### 8. Rate Limiting Window
 
-A:
+**Question:** Implement per-user 100 requests per 15 minutes.
 
-Use HashSet on idempotencyKey.
+**Answer:**
+- Store `(userId, windowStart, count)`
+- Reset after 15 minutes
+- **Production:** use Redis TTL + atomic increment
 
-Stripe rule: All APIs must be idempotent-safe.
+---
 
-8. Rate Limiting Window
+### 9. Reconciliation of Events
 
-Q: Implement per-user 100 requests per 15 minutes.
+**Question:** Stripe ledger has 1,000 events/day. Some events missing in merchant DB. Detect differences.
 
-A:
+**Answer:**
+- Use `event.id` → full outer join
+- Merchant should ack every event; missing = alert
 
-Store (userId, windowStart, count).
+---
 
-Reset after 15 minutes.
+### 10. Matching Transfers with Refunds
 
-Production: use Redis TTL + atomic increment.
+**Question:** Given payouts and refunds, ensure net zero.
 
-9. Reconciliation of Events
+**Answer:**
+- Group by merchant → `sum(payouts) - sum(refunds) = balance`
+- Stripe always enforces ledger consistency
 
-Q: Stripe ledger has 1,000 events/day. Some events missing in merchant DB. Detect differences.
+---
 
-A:
+## Section 2: System Design (8)
 
-Use event.id → full outer join.
+### 11. Rate Limiter
 
-Merchant should ack every event; missing = alert.
+**Question:** Design a scalable rate limiting system.
 
-10. Matching Transfers with Refunds
-
-Q: Given payouts and refunds, ensure net zero.
-
-A:
-
-Group by merchant → sum(payouts) - sum(refunds) = balance.
-
-Stripe always enforces ledger consistency.
-
-Section 2: System Design (8)
-11. Rate Limiter
-
+**Answer:**
 👉 Already covered above (Redis + token bucket).
 
-12. Multi-Currency Ledger
+---
 
+### 12. Multi-Currency Ledger
+
+**Question:** Design a ledger system supporting multiple currencies.
+
+**Answer:**
 👉 Already covered above (double-entry, minor units).
 
-13. Real-Time Fraud Detection System
+---
 
-Q: How to catch suspicious transactions (e.g., $10k charge from new card)?
+### 13. Real-Time Fraud Detection System
 
-A:
+**Question:** How to catch suspicious transactions (e.g., $10k charge from new card)?
 
-Stream events → Kafka → ML scoring service.
+**Answer:**
+- **Architecture:** Stream events → Kafka → ML scoring service
+- **Features:** geolocation, device fingerprint, velocity of charges
+- **Latency budget:** <200ms inline decision
+- **Stripe insight:** Prioritizes blocking fraud before authorization completes
 
-Features: geolocation, device fingerprint, velocity of charges.
+---
 
-Latency budget: <200ms inline decision.
+### 14. Idempotent Payment API
 
-Stripe prioritizes blocking fraud before authorization completes.
+**Question:** Ensure client retries don't double-charge.
 
-14. Idempotent Payment API
+**Answer:**
+- API requires `Idempotency-Key` header
+- Store result in Redis keyed by `(key, endpoint)`
+- Return same response if retried
 
-Q: Ensure client retries don’t double-charge.
+---
 
-A:
+### 15. Webhook Delivery Service
 
-API requires Idempotency-Key header.
+**Question:** How to design webhook delivery at scale?
 
-Store result in Redis keyed by (key, endpoint).
+**Answer:**
+- **Pattern:** Push → retry with exponential backoff
+- **Deduplication:** by `event.id`
+- **Merchant-facing:** must handle at-least-once delivery
 
-Return same response if retried.
+---
 
-15. Webhook Delivery Service
+### 16. Invoicing System
 
-Q: How to design webhook delivery at scale?
+**Question:** Build a scalable invoice engine.
 
-A:
+**Answer:**
+- **Tables:** `invoices`, `invoice_items`, `payments`
+- **Immutability:** Generate invoice snapshot at time of issue
+- **Features:** Support retries + dunning (email, retries)
 
-Push → retry with exponential backoff.
+---
 
-Deduplication by event.id.
+### 17. Real-Time Dashboard for 10M Payments
 
-Merchant-facing: must handle at-least-once delivery.
+**Question:** Show merchant dashboard with metrics in <1s.
 
-16. Invoicing System
+**Answer:**
+- Use pre-aggregated OLAP store (ClickHouse/BigQuery)
+- Periodic ETL from ledger
+- Serve queries via cached materialized views
 
-Q: Build a scalable invoice engine.
+---
 
-A:
+### 18. Dispute Resolution System
 
-Tables: invoices, invoice_items, payments.
+**Question:** Design chargeback handling.
 
-Generate invoice snapshot at time of issue (immutability).
+**Answer:**
+- Store `disputes` table linked to charges
+- Merchant uploads evidence → async workflow
+- **SLA tracking:** must respond within 7 days
+- **Stripe approach:** Uses workflow orchestration (Airflow/Step Functions)
 
-Support retries + dunning (email, retries).
+---
 
-17. Real-Time Dashboard for 10M Payments
+## Section 3: API & Product (6)
 
-Q: Show merchant dashboard with metrics in <1s.
+### 19. Bulk Payouts API
 
-A:
+**Question:** Design an API for bulk payouts.
 
-Use pre-aggregated OLAP store (ClickHouse/BigQuery).
-
-Periodic ETL from ledger.
-
-Serve queries via cached materialized views.
-
-18. Dispute Resolution System
-
-Q: Design chargeback handling.
-
-A:
-
-Store disputes table linked to charges.
-
-Merchant uploads evidence → async workflow.
-
-SLA tracking (must respond within 7 days).
-
-Stripe uses workflow orchestration (Airflow/Step Functions).
-
-Section 3: API & Product (6)
-19. Bulk Payouts API
-
+**Answer:**
 👉 Already covered above.
 
-20. Onboarding API for Connect Accounts
+---
 
-Q: Design API to onboard new connected accounts.
+### 20. Onboarding API for Connect Accounts
 
-A:
+**Question:** Design API to onboard new connected accounts.
 
-POST /accounts with business info.
+**Answer:**
+- `POST /accounts` with business info
+- Return `account_id`
+- Support KYC → async verification → `verified` flag
+- **Stripe insight:** Must handle global compliance laws
 
-Return account_id.
+---
 
-Support KYC → async verification → verified flag.
+### 21. Subscription API
 
-Stripe: must handle global compliance laws.
+**Question:** Design API to create subscriptions.
 
-21. Subscription API
+**Answer:**
+- `POST /subscriptions` → `{ customer_id, plan_id }`
+- Store next invoice date, billing cycle
+- Support proration when switching plans
 
-Q: Design API to create subscriptions.
+---
 
-A:
+### 22. Refund API
 
-POST /subscriptions → { customer_id, plan_id }.
+**Question:** API to refund a payment.
 
-Store next invoice date, billing cycle.
+**Answer:**
+- `POST /refunds { charge_id, amount }`
+- Must support partial refunds
+- Idempotent by `(charge_id, idempotency_key)`
 
-Support proration when switching plans.
+---
 
-22. Refund API
+### 23. Idempotency Explained to Non-Tech Merchant
 
-Q: API to refund a payment.
+**Question:** How would you explain "idempotency" to a merchant?
 
-A:
+**Answer:**
+"If you click 'refund' 3 times, we guarantee it happens only once. Idempotency means no accidental duplicates."
 
-POST /refunds { charge_id, amount }.
+---
 
-Must support partial refunds.
+### 24. API Error Design
 
-Idempotent by (charge_id, idempotency_key).
+**Question:** How should Stripe structure errors?
 
-23. Idempotency Explained to Non-Tech Merchant
+**Answer:**
+- **JSON format:** `{ error: { type, code, message, param } }`
+- Always actionable messages
+- **Stripe value:** Developer empathy
 
-Q: How would you explain “idempotency” to a merchant?
+---
 
-A:
+## Section 4: Debugging & Behavioral (6)
 
-“If you click ‘refund’ 3 times, we guarantee it happens only once. Idempotency means no accidental duplicates.”
+### 25. Webhook Duplicates
 
-24. API Error Design
+**Question:** How do you handle webhook duplicate delivery?
 
-Q: How should Stripe structure errors?
-
-A:
-
-JSON format: { error: { type, code, message, param } }.
-
-Always actionable messages.
-
-Stripe values developer empathy.
-
-Section 4: Debugging & Behavioral (6)
-25. Webhook Duplicates
-
+**Answer:**
 👉 Already covered.
 
-26. Slow Dashboard Queries
+---
 
+### 26. Slow Dashboard Queries
+
+**Question:** How do you optimize slow dashboard queries?
+
+**Answer:**
 👉 Already covered.
 
-27. Memory Leak in Node.js API
+---
 
-Q: EKS pod OOMKilled every 8h. Debug?
+### 27. Memory Leak in Node.js API
 
-A:
+**Question:** EKS pod OOMKilled every 8h. Debug?
 
-Use heap dump → check event listeners/objects not GC’d.
+**Answer:**
+- Use heap dump → check event listeners/objects not GC'd
+- **Common bug:** caching unbounded user sessions
+- **Fix:** LRU cache or Redis external store
 
-Common bug: caching unbounded user sessions.
+---
 
-Fix: LRU cache or Redis external store.
+### 28. Charge Failing in Production
 
-28. Charge Failing in Production
+**Question:** Merchant reports "all charges failing."
 
-Q: Merchant reports “all charges failing.”
+**Answer:**
+- Check Stripe status page → gateway outage?
+- Debug logs → invalid API key or expired secret?
+- **Stripe's approach:** Prioritize blast radius containment
 
-A:
+---
 
-Check Stripe status page → gateway outage?
+### 29. Behavioral: Disagreement with Teammate
 
-Debug logs → invalid API key or expired secret?
+**Question:** Tell me about a time you disagreed with a peer.
 
-Stripe’s approach: prioritize blast radius containment.
+**Answer (STAR):**
+- **Situation:** Disagreement over database choice (SQL vs NoSQL)
+- **Task:** Needed reliable ledger system
+- **Action:** Collected metrics, ran spike tests, showed why Postgres met ACID needs
+- **Result:** Team aligned, decision accepted
 
-29. Behavioral: Disagreement with Teammate
+**Shows Stripe value:** Seek the Truth, Not Consensus.
 
-Q: Tell me about a time you disagreed with a peer.
+---
 
-A (STAR):
+### 30. Behavioral: Users First
 
-S: Disagreement over database choice (SQL vs NoSQL).
+**Question:** Tell me about a time you put users first.
 
-T: Needed reliable ledger system.
+**Answer (STAR):**
+- **Situation:** Developer onboarding was slow
+- **Task:** Reduce integration pain
+- **Action:** Built SDK + examples, wrote better docs
+- **Result:** Integration time dropped 70%
 
-A: Collected metrics, ran spike tests, showed why Postgres met ACID needs.
+**Stripe insight:** Looks for developer-first empathy.
 
-R: Team aligned, decision accepted.
+---
 
-Shows Stripe value: Seek the Truth, Not Consensus.
+## ✅ How to Use This Workbook
 
-30. Behavioral: Users First
+### Study Tips
+- **Practice coding Qs** in LeetCode-style editor
+- **Whiteboard design Qs** (draw diagrams)
+- **Roleplay API/product Qs** out loud (simulate PM convo)
+- **Reflect on behavioral Qs** with STAR method
 
-Q: Tell me about a time you put users first.
+### Success Strategy
+- Focus on Stripe-specific insights and values
+- Emphasize developer experience and empathy
+- Demonstrate understanding of payment systems complexity
+- Show problem-solving approach with real-world context
 
-A (STAR):
+---
 
-S: Developer onboarding was slow.
-
-T: Reduce integration pain.
-
-A: Built SDK + examples, wrote better docs.
-
-R: Integration time dropped 70%.
-
-Stripe looks for developer-first empathy.
-
-✅ How to Use This Workbook
-
-Practice coding Qs in LeetCode-style editor.
-
-Whiteboard design Qs (draw diagrams).
-
-Roleplay API/product Qs out loud (simulate PM convo).
-
-Reflect on behavioral Qs with STAR.
+*Good luck with your Stripe interview! 🚀*
